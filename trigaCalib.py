@@ -22,6 +22,29 @@ import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 import pandas as pd
 from scipy.optimize import curve_fit
+import argparse
+import shutil
+import sys
+import os
+from PyPDF2 import PdfMerger
+
+def concatenate_pdfs(output_filename):
+    tmp_dir = './tmp'
+    
+    # Lista todos os arquivos PDF na pasta tmp
+    pdf_files = [os.path.join(tmp_dir, f) for f in os.listdir(tmp_dir) if f.endswith('.pdf')]
+    
+    # Ordenar os arquivos com o PDF 'final.pdf' no início e os outros em ordem numérica
+    pdf_files.sort(key=lambda x: (not x.endswith('final.pdf'), int(os.path.splitext(os.path.basename(x))[0]) if os.path.splitext(os.path.basename(x))[0].isdigit() else float('inf')))
+
+    # Cria um PdfMerger para combinar os PDFs
+    merger = PdfMerger()
+
+    for pdf in pdf_files:
+        merger.append(pdf)
+
+    merger.write(output_filename)
+    merger.close()
 
 def calculate_dBar_dRea(caminho_arquivo,name_pdf,janela=10, valor_cruzamento_positivo=2, valor_cruzamento_negativo=-2, tempo_acomodacao=60):
     """
@@ -281,5 +304,137 @@ def calculate_dBar_dRea(caminho_arquivo,name_pdf,janela=10, valor_cruzamento_pos
     
     return posicao_inicial_barra, posicao_final_barra, reatividade_PCM 
 
-calculate_dBar_dRea('aqui3-100cut.csv','relatorio.pdf')
+#def calibBarReg():
+#    calculate_dBar_dRea('aqui3-100cut.csv','relatorio.pdf')
+
+def main():
+    """
+    --calib-reg
+    --inter-calib
+    --test
+    """
+    
+    """
+    REG DEL CON REA
+    150   0 561 
+    250 100 561 34,0
+    250   0 555
+    350 100 555 58,5 
+    350   0 544
+    433  83 544 60,8
+    433   0 533
+    512  79 533 64,0
+    512   0 521
+    591  79 521 62,4 
+    591   0 510 
+    681  90 510 55,3
+    681   0 499
+    771  90 499 38,7
+    771   0 491
+    904 133 491 30,4 
+    904   0 486
+    """
+    
+
+    # Configurar o argparse para capturar os argumentos de linha de comando
+    parser = argparse.ArgumentParser(description='Realizar calibração das barras de controle a partir de arquivos de aquisição de dados CSV')
+    parser.add_argument('files', nargs='*', help='Nomes dos arquivos de aquisição de dados .CSV')
+    parser.add_argument('-g', '--gpoly', type=int, help='Grau do polinômio a ser usado')
+    parser.add_argument('-n', '--name', type=str, help='Nome do PDF que conterá o relatório completo')
+    
+    # Criar um grupo de argumentos mutuamente exclusivos
+    group = parser.add_mutually_exclusive_group(required=True)
+    group.add_argument('-c', '--calib-reg', action='store_true', help='Realizar calibração da barra de regulação')
+    group.add_argument('-i', '--inter-calib', action='store_true', help='Realizar intercalibração das barras de segurança e de controle')
+    group.add_argument('-t', '--test', action='store_true', help='Executar em modo de teste (não precisa passar arquivos de entrada)')
+    group.add_argument('-r', '--report', action='store_true', help='Executar o relatório de reatividade')
+
+
+    # Parse dos argumentos
+    args = parser.parse_args()
+
+    if args.name is not None:
+        pdfname = args.name
+    else:
+        pdfname = "report.pdf"
+        
+    #Se estiver no modo teste, pegar valores de exemplo
+    if args.test:
+        # Dados extraidos da calibração de 2023 (reatividade em centavos)
+        dBar_dRea = [
+            [150, 150,    0],
+            [150, 250, 34.0],
+            [250, 350, 58.5], 
+            [350, 433, 60.8],
+            [433, 512, 64.0],
+            [512, 591, 62.4], 
+            [591, 681, 55.3],
+            [681, 771, 38.7],
+            [771, 904, 30.4],
+            ]
+    elif args.report:
+        #Apenas gerar o relatório dos arquivos de entrada
+        if args.files:
+            if os.path.exists('./tmp'):
+                shutil.rmtree('./tmp')
+            for i, name in enumerate(args.files):
+                calculate_dBar_dRea(name, f'./tmp/{i}.pdf')
+            concatenate_pdfs(pdfname)
+    else:
+        #Obter o delta de barra e reatividade a partir dos arquivos de entrada
+        if args.files:
+            dBar_dRea = []
+            if os.path.exists('./tmp'):
+                shutil.rmtree('./tmp')
+            for i, name in enumerate(args.files):
+                dBar_dRea.append(calculate_dBar_dRea(name, f'./tmp/{i}.pdf'))
+        else:
+            parser.print_help()
+            sys.exit()
+        
+    # Converter os dados para arrays numpy
+    #x = np.array([row[1] for row in dBar_dRea])  # Segunda coluna
+    x = np.array([(row[0] + row[1]) / 2 for row in dBar_dRea])
+    y = np.array([row[2] for row in dBar_dRea])  # Terceira coluna
+    y = np.cumsum(y)
+    
+    if args.gpoly is not None:
+        gpoly = args.gpoly
+    else:
+        gpoly = 3
+    
+    # Regreção linear com o grau do polinômio especificado
+    coeffs = np.polyfit(x, y, gpoly)
+    poly = np.poly1d(coeffs)
+
+    # Gerar valores para plotagem
+    x_fit = np.linspace(min(x), max(x), 100)
+    y_fit = poly(x_fit)
+
+    from reportlab.lib.pagesizes import A4
+    from reportlab.pdfgen import canvas
+    from reportlab.lib.units import inch
+    import matplotlib.backends.backend_pdf
+
+    os.makedirs('./tmp',exist_ok=True)
+    c = canvas.Canvas("./tmp/final.pdf", pagesize=A4)
+    c.drawString(72, 800, "Página Inicial A4")  # Adiciona um texto simples
+    c.showPage()
+    c.save()
+
+    with matplotlib.backends.backend_pdf.PdfPages("./tmp/final.pdf") as pdf_pages:
+        plt.figure(figsize=(8.27, 11.69))  # Tamanho A4 em polegadas (8.27 x 11.69)
+        plt.scatter(x, y, color='red', label='dP/dR')
+        plt.plot(x_fit, y_fit, label=f'Ajuste Polinomial ({gpoly}º Grau)', color='blue')
+        plt.xlabel('Posição de Barra')
+        plt.ylabel('Reatividade')
+        plt.title('Reatividade em função da posição de barra')
+        plt.legend()
+        plt.grid(True)
+        pdf_pages.savefig()  # Salva o gráfico no PDF
+
+    concatenate_pdfs(pdfname)
+
+if __name__ == '__main__':
+    main()
 
