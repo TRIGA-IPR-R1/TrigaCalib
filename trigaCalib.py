@@ -1,3 +1,4 @@
+#!/bin/python
 """
 TrigaCalib is a software multi-system to calibrate the control bars
 of Nuclear Reator Triga IPR-R1 by some CSV data file of input.
@@ -45,8 +46,9 @@ def concatenate_pdfs(output_filename):
 
     merger.write(output_filename)
     merger.close()
+    shutil.rmtree(tmp_dir)
 
-def calculate_dBar_dRea(caminho_arquivo,name_pdf,janela=10, valor_cruzamento_positivo=2, valor_cruzamento_negativo=-2, tempo_acomodacao=60):
+def calculate_dBar_dRea(caminho_arquivo,indice_relatorio, name_pdf,janela=10, valor_cruzamento_positivo=2, valor_cruzamento_negativo=-2, tempo_acomodacao=60):
     """
     Ler arquivo CSV
     Descobrir se colunas de tempo do PLC estão disponíveis (PLC_CONV_TIME_ ou PLC_ORIG_TIME_) e importar dados
@@ -106,7 +108,7 @@ def calculate_dBar_dRea(caminho_arquivo,name_pdf,janela=10, valor_cruzamento_pos
     
     # Descobrir se coluna de barra de regulação está disponível (PLC_CONV_BarraCon) e importar dados
     if 'PLC_CONV_BarraCon' in df.columns:
-        dados['posicao'] = df['PLC_CONV_BarraCon'].values
+        dados['posicao'] = df['PLC_CONV_BarraReg'].values
     else:
         print("Error: import PLC_CONV_BarraCon from ", caminho_arquivo)
         return None
@@ -140,6 +142,18 @@ def calculate_dBar_dRea(caminho_arquivo,name_pdf,janela=10, valor_cruzamento_pos
     # Deleta a quantidade de janela da primeira e ultimas posições
     tempo_cortado = dados['tempo'][janela:-janela]
     derivada_posicao_cortada = derivada_posicao[janela:-janela]
+
+
+
+
+
+    #plt.plot(tempo_cortado, derivada_posicao_cortada, label='Derivada', color='blue')
+    #plt.xlabel('tempo')
+    #plt.ylabel('Derivada')
+    #plt.title('Derivada da posição da barra')
+    #plt.legend()
+    #plt.grid(True)
+    #plt.show()
 
     # Calcular tempos de cruzamento positivo
     cruzamentos_acima_positivo = []
@@ -185,12 +199,12 @@ def calculate_dBar_dRea(caminho_arquivo,name_pdf,janela=10, valor_cruzamento_pos
             final_janela4 = cruzamentos_abaixo_negativo[0]
         else:
             final_janela4 = cruzamentos_acima_positivo[1]
-    else:
-        if len(cruzamentos_acima_positivo) >= 2:
-            final_janela4 = cruzamentos_abaixo_negativo[1]
-        elif len(cruzamentos_abaixo_negativo) >= 1:
-            final_janela4 = cruzamentos_acima_positivo[0]
-        final_janela4 = dados['tempo'][-1]
+    #else:
+    #    if len(cruzamentos_acima_positivo) >= 2:
+    #        final_janela4 = cruzamentos_abaixo_negativo[1]
+    #    elif len(cruzamentos_abaixo_negativo) >= 1:
+    #        final_janela4 = cruzamentos_acima_positivo[0]
+    final_janela4 = dados['tempo'][-1]
 
     janela4 = {
         'tempo': dados['tempo'][(dados['tempo'] > dados['tempo'][indice_mais_proximo]) & (dados['tempo'] <= final_janela4)],
@@ -201,16 +215,20 @@ def calculate_dBar_dRea(caminho_arquivo,name_pdf,janela=10, valor_cruzamento_pos
     posicao_inicial_barra = np.mean(janela1['posicao']) if len(janela1['posicao']) > 0 else np.nan
     posicao_final_barra = np.mean(janela4['posicao']) if len(janela4['posicao']) > 0 else np.nan
 
-
+    #Deslocar tempo 0 para inicio da janela4
+    janela1['tempo'] -= dados['tempo'][indice_mais_proximo]
+    janela2['tempo'] -= dados['tempo'][indice_mais_proximo]
+    janela3['tempo'] -= dados['tempo'][indice_mais_proximo]
+    janela4['tempo'] -= dados['tempo'][indice_mais_proximo]
     
     # Regressão exponencial
     def exponencial(x, a, b):
         return a * np.exp(b * x)
-    popt, pcov = curve_fit(exponencial, janela4['tempo'], janela4['potencia'], p0=[1, 0.1]) # p0 são os valores iniciais para a otimização
+    popt, pcov = curve_fit(exponencial, janela4['tempo'], janela4['potencia'], p0=[1, 0.01]) # p0 são os valores iniciais para a otimização
     a, b = popt
     
     # Calcaular periodo
-    periodo = 1/b
+    periodo = 1/b    
 
     # Calular reatividade
     Beff = 0.007
@@ -236,8 +254,8 @@ def calculate_dBar_dRea(caminho_arquivo,name_pdf,janela=10, valor_cruzamento_pos
                                +(B6/(1+A6*periodo)))
     
     # Gerar dados ajustados para visualização
-    #x_fit = np.linspace(min(janela2['tempo']), max(janela4['tempo']), 100)
-    #y_fit = exponencial(x_fit, *popt)
+    x_fit = np.linspace(min(janela2['tempo']), max(janela4['tempo']), 100)
+    y_fit = exponencial(x_fit, *popt)
 
     # Criação do PDF
     with PdfPages(name_pdf) as pdf:
@@ -268,7 +286,7 @@ def calculate_dBar_dRea(caminho_arquivo,name_pdf,janela=10, valor_cruzamento_pos
         plt.table(cellText=tabela_dados, colLabels=col_labels, loc='center', cellLoc='left', colColours=['lightgrey', 'lightgrey'])
         
         # Ajusta o layout para a tabela
-        plt.title('Relatório n° 1 de Inserção de Reatividade (BarraReg)', fontsize=16)
+        plt.title(f'Relatório n° {indice_relatorio} de Inserção de Reatividade (BarraReg)', fontsize=16)
         plt.subplots_adjust(left=0.1, right=0.9, top=0.7, bottom=0.2)  # Ajuste para deixar espaço para a tabela
         
         # Adiciona os gráficos abaixo da tabela
@@ -285,6 +303,7 @@ def calculate_dBar_dRea(caminho_arquivo,name_pdf,janela=10, valor_cruzamento_pos
         plt.grid(True)
         
         plt.subplot(3, 1, 3)
+        plt.plot(x_fit, y_fit, linestyle='-', color='purple', label='Regressão Exponencial')
         plt.plot(janela1['tempo'], janela1['potencia'], linestyle='-', color='r', label='Janela 1')
         plt.plot(janela2['tempo'], janela2['potencia'], linestyle='-', color='b', label='Janela 2')
         plt.plot(janela3['tempo'], janela3['potencia'], linestyle='-', color='g', label='Janela 3')
@@ -357,7 +376,9 @@ def main():
         pdfname = args.name
     else:
         pdfname = "report.pdf"
-        
+    
+    dBar_dRea = [(np.float64(186.97496365817088), np.float64(186.97496365817088),   np.float64(0))]
+    #dBar_dRea = []
     #Se estiver no modo teste, pegar valores de exemplo
     if args.test:
         # Dados extraidos da calibração de 2023 (reatividade em centavos)
@@ -377,24 +398,27 @@ def main():
         if args.files:
             if os.path.exists('./tmp'):
                 shutil.rmtree('./tmp')
+            os.makedirs('./tmp',exist_ok=True)
             for i, name in enumerate(args.files):
-                calculate_dBar_dRea(name, f'./tmp/{i}.pdf')
+                calculate_dBar_dRea(name,1, f'./tmp/{i}.pdf')
             concatenate_pdfs(pdfname)
+            sys.exit()
     else:
         #Obter o delta de barra e reatividade a partir dos arquivos de entrada
         if args.files:
-            dBar_dRea = []
             if os.path.exists('./tmp'):
                 shutil.rmtree('./tmp')
+            os.makedirs('./tmp',exist_ok=True)
             for i, name in enumerate(args.files):
-                dBar_dRea.append(calculate_dBar_dRea(name, f'./tmp/{i}.pdf'))
+                dBar_dRea.append(calculate_dBar_dRea(name, i+1, f'./tmp/{i}.pdf'))
         else:
             parser.print_help()
             sys.exit()
         
     # Converter os dados para arrays numpy
-    #x = np.array([row[1] for row in dBar_dRea])  # Segunda coluna
-    x = np.array([(row[0] + row[1]) / 2 for row in dBar_dRea])
+    #print(dBar_dRea)
+    x = np.array([row[1] for row in dBar_dRea])  # Segunda coluna
+    #x = np.array([(row[0] + row[1]) / 2 for row in dBar_dRea])
     y = np.array([row[2] for row in dBar_dRea])  # Terceira coluna
     y = np.cumsum(y)
     
