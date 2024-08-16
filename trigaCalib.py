@@ -48,7 +48,7 @@ def concatenate_pdfs(output_filename):
     merger.close()
     shutil.rmtree(tmp_dir)
 
-def calculate_dBar_dRea(caminho_arquivo,indice_relatorio, name_pdf,janela=10, valor_cruzamento_positivo=2, valor_cruzamento_negativo=-2, tempo_acomodacao=60):
+def calculate_dBar_dRea(caminho_arquivo,indice_relatorio,janela=10, valor_cruzamento_positivo=3, valor_cruzamento_negativo=-3, tempo_acomodacao=60):
     """
     Ler arquivo CSV
     Descobrir se colunas de tempo do PLC estão disponíveis (PLC_CONV_TIME_ ou PLC_ORIG_TIME_) e importar dados
@@ -173,153 +173,169 @@ def calculate_dBar_dRea(caminho_arquivo,indice_relatorio, name_pdf,janela=10, va
         elif derivada_posicao_cortada[i - 1] > valor_cruzamento_negativo >= derivada_posicao_cortada[i]:
             cruzamentos_abaixo_negativo.append(tempo_cortado[i])
     
-    # Definir as janelas de tempo
-    janela1 = {
-        'tempo': dados['tempo'][dados['tempo'] <= cruzamentos_acima_positivo[0]],
-        'posicao': dados['posicao'][dados['tempo'] <= cruzamentos_acima_positivo[0]],
-        'potencia': dados['potencia'][dados['tempo'] <= cruzamentos_acima_positivo[0]]
-    }
+    print(len(cruzamentos_acima_positivo), "\t", cruzamentos_acima_positivo)
+    print()
+    print(len(cruzamentos_abaixo_positivo), "\t", cruzamentos_abaixo_positivo)
+    print()
+    print(len(cruzamentos_abaixo_negativo), "\t", cruzamentos_abaixo_negativo)
+    print()
+    print(len(cruzamentos_acima_negativo), "\t", cruzamentos_acima_negativo)
+    print()
 
-    janela2 = {
-        'tempo': dados['tempo'][(dados['tempo'] > cruzamentos_acima_positivo[0]) & (dados['tempo'] <= cruzamentos_abaixo_positivo[0])],
-        'posicao': dados['posicao'][(dados['tempo'] > cruzamentos_acima_positivo[0]) & (dados['tempo'] <= cruzamentos_abaixo_positivo[0])],
-        'potencia': dados['potencia'][(dados['tempo'] > cruzamentos_acima_positivo[0]) & (dados['tempo'] <= cruzamentos_abaixo_positivo[0])]
-    }
+    for i in range(0,len(cruzamentos_acima_positivo)):
+        # Definir as janelas de tempo
+        janela1 = {
+            'tempo': dados['tempo'][dados['tempo'] <= cruzamentos_acima_positivo[i]],
+            'posicao': dados['posicao'][dados['tempo'] <= cruzamentos_acima_positivo[i]],
+            'potencia': dados['potencia'][dados['tempo'] <= cruzamentos_acima_positivo[i]]
+        }
 
-    tempo_apos_cruzamento = cruzamentos_abaixo_positivo[0] + tempo_acomodacao
-    indice_mais_proximo = np.abs(dados['tempo'] - tempo_apos_cruzamento).argmin()
-    janela3 = {
-        'tempo': dados['tempo'][(dados['tempo'] > cruzamentos_abaixo_positivo[0]) & (dados['tempo'] <= dados['tempo'][indice_mais_proximo])],
-        'posicao': dados['posicao'][(dados['tempo'] > cruzamentos_abaixo_positivo[0]) & (dados['tempo'] <= dados['tempo'][indice_mais_proximo])],
-        'potencia': dados['potencia'][(dados['tempo'] > cruzamentos_abaixo_positivo[0]) & (dados['tempo'] <= dados['tempo'][indice_mais_proximo])]
-    }
+        janela2 = {
+            'tempo': dados['tempo'][(dados['tempo'] > cruzamentos_acima_positivo[i]) & (dados['tempo'] <= cruzamentos_abaixo_positivo[i])],
+            'posicao': dados['posicao'][(dados['tempo'] > cruzamentos_acima_positivo[i]) & (dados['tempo'] <= cruzamentos_abaixo_positivo[i])],
+            'potencia': dados['potencia'][(dados['tempo'] > cruzamentos_acima_positivo[i]) & (dados['tempo'] <= cruzamentos_abaixo_positivo[i])]
+        }
 
-    if len(cruzamentos_acima_positivo) >= 2 and len(cruzamentos_abaixo_negativo) >= 1:
-        if cruzamentos_acima_positivo[1] > cruzamentos_abaixo_negativo[0]:
-            final_janela4 = cruzamentos_abaixo_negativo[0]
+        tempo_apos_cruzamento = cruzamentos_abaixo_positivo[i] + tempo_acomodacao
+        indice_mais_proximo = np.abs(dados['tempo'] - tempo_apos_cruzamento).argmin()
+        janela3 = {
+            'tempo': dados['tempo'][(dados['tempo'] > cruzamentos_abaixo_positivo[i]) & (dados['tempo'] <= dados['tempo'][indice_mais_proximo])],
+            'posicao': dados['posicao'][(dados['tempo'] > cruzamentos_abaixo_positivo[i]) & (dados['tempo'] <= dados['tempo'][indice_mais_proximo])],
+            'potencia': dados['potencia'][(dados['tempo'] > cruzamentos_abaixo_positivo[i]) & (dados['tempo'] <= dados['tempo'][indice_mais_proximo])]
+        }
+
+        #if len(cruzamentos_acima_positivo) >= 2 and len(cruzamentos_abaixo_negativo) >= 1:
+        #    if cruzamentos_acima_positivo[i+1] > cruzamentos_abaixo_negativo[0]:
+        #        final_janela4 = cruzamentos_abaixo_negativo[0]
+        #    else:
+        #        final_janela4 = cruzamentos_acima_positivo[i+1]
+        #else:
+        #    if len(cruzamentos_acima_positivo) >= 2:
+        #        final_janela4 = cruzamentos_acima_positivo[i+1]
+        #    elif len(cruzamentos_abaixo_negativo) >= 1:
+        #        final_janela4 = cruzamentos_abaixo_negativo[0]
+        #    else:
+        #        final_janela4 = dados['tempo'][-1]
+        
+        if len(cruzamentos_acima_positivo) >= 2 and i != (len(cruzamentos_acima_positivo) - 1):
+                final_janela4 = cruzamentos_acima_positivo[i+1]
         else:
-            final_janela4 = cruzamentos_acima_positivo[1]
-    #else:
-    #    if len(cruzamentos_acima_positivo) >= 2:
-    #        final_janela4 = cruzamentos_abaixo_negativo[1]
-    #    elif len(cruzamentos_abaixo_negativo) >= 1:
-    #        final_janela4 = cruzamentos_acima_positivo[0]
-    final_janela4 = dados['tempo'][-1]
+            final_janela4 = dados['tempo'][-1]
 
-    janela4 = {
-        'tempo': dados['tempo'][(dados['tempo'] > dados['tempo'][indice_mais_proximo]) & (dados['tempo'] <= final_janela4)],
-        'posicao': dados['posicao'][(dados['tempo'] > dados['tempo'][indice_mais_proximo]) & (dados['tempo'] <= final_janela4)],
-        'potencia': dados['potencia'][(dados['tempo'] > dados['tempo'][indice_mais_proximo]) & (dados['tempo'] <= final_janela4)]
-    }
-    
-    posicao_inicial_barra = np.mean(janela1['posicao']) if len(janela1['posicao']) > 0 else np.nan
-    posicao_final_barra = np.mean(janela4['posicao']) if len(janela4['posicao']) > 0 else np.nan
+        janela4 = {
+            'tempo': dados['tempo'][(dados['tempo'] > dados['tempo'][indice_mais_proximo]) & (dados['tempo'] <= final_janela4)],
+            'posicao': dados['posicao'][(dados['tempo'] > dados['tempo'][indice_mais_proximo]) & (dados['tempo'] <= final_janela4)],
+            'potencia': dados['potencia'][(dados['tempo'] > dados['tempo'][indice_mais_proximo]) & (dados['tempo'] <= final_janela4)]
+        }
+        
+        posicao_inicial_barra = np.mean(janela1['posicao']) if len(janela1['posicao']) > 0 else np.nan
+        posicao_final_barra = np.mean(janela4['posicao']) if len(janela4['posicao']) > 0 else np.nan
 
-    #Deslocar tempo 0 para inicio da janela4
-    janela1['tempo'] -= dados['tempo'][indice_mais_proximo]
-    janela2['tempo'] -= dados['tempo'][indice_mais_proximo]
-    janela3['tempo'] -= dados['tempo'][indice_mais_proximo]
-    janela4['tempo'] -= dados['tempo'][indice_mais_proximo]
-    
-    # Regressão exponencial
-    def exponencial(x, a, b):
-        return a * np.exp(b * x)
-    popt, pcov = curve_fit(exponencial, janela4['tempo'], janela4['potencia'], p0=[1, 0.01]) # p0 são os valores iniciais para a otimização
-    a, b = popt
-    
-    # Calcaular periodo
-    periodo = 1/b    
+        #Deslocar tempo 0 para inicio da janela4
+        janela1['tempo'] -= dados['tempo'][indice_mais_proximo]
+        janela2['tempo'] -= dados['tempo'][indice_mais_proximo]
+        janela3['tempo'] -= dados['tempo'][indice_mais_proximo]
+        janela4['tempo'] -= dados['tempo'][indice_mais_proximo]
+        
+        # Regressão exponencial
+        def exponencial(x, a, b):
+            return a * np.exp(b * x)
+        popt, pcov = curve_fit(exponencial, janela4['tempo'], janela4['potencia'], p0=[1, 0.01]) # p0 são os valores iniciais para a otimização
+        a, b = popt
+        
+        # Calcaular periodo
+        periodo = 1/b    
 
-    # Calular reatividade
-    Beff = 0.007
-    l    = 0.000073
-    B1   = 0.00021
-    A1   = 0.01243982736
-    B2   = 0.00141
-    A2   = 0.03050823858
-    B3   = 0.00127
-    A3   = 0.1114384535
-    B4   = 0.00255
-    A4   = 0.3013683394
-    B5   = 0.00074
-    A5   = 1.136306853
-    B6   = 0.00027
-    A6   = 3.013683394
-    reatividade_PCM  = 100000*((l/periodo)
-                               +(B1/(1+A1*periodo))
-                               +(B2/(1+A2*periodo))
-                               +(B3/(1+A3*periodo))
-                               +(B4/(1+A4*periodo))
-                               +(B5/(1+A5*periodo))
-                               +(B6/(1+A6*periodo)))
-    
-    # Gerar dados ajustados para visualização
-    x_fit = np.linspace(min(janela2['tempo']), max(janela4['tempo']), 100)
-    y_fit = exponencial(x_fit, *popt)
+        # Calular reatividade
+        Beff = 0.007
+        l    = 0.000073
+        B1   = 0.00021
+        A1   = 0.01243982736
+        B2   = 0.00141
+        A2   = 0.03050823858
+        B3   = 0.00127
+        A3   = 0.1114384535
+        B4   = 0.00255
+        A4   = 0.3013683394
+        B5   = 0.00074
+        A5   = 1.136306853
+        B6   = 0.00027
+        A6   = 3.013683394
+        reatividade_PCM  = 100000*((l/periodo)
+                                +(B1/(1+A1*periodo))
+                                +(B2/(1+A2*periodo))
+                                +(B3/(1+A3*periodo))
+                                +(B4/(1+A4*periodo))
+                                +(B5/(1+A5*periodo))
+                                +(B6/(1+A6*periodo)))
+        
+        # Gerar dados ajustados para visualização
+        x_fit = np.linspace(min(janela2['tempo']), max(janela4['tempo']), 100)
+        y_fit = exponencial(x_fit, *popt)
 
-    # Criação do PDF
-    with PdfPages(name_pdf) as pdf:
-        
-        # Criação da figura
-        plt.figure(figsize=(8.27, 11.69))
-        
-        # Adiciona a tabela na figura
-        tabela_dados = [
-            ["Posição Inicial da Barra de Regulação:", f"{posicao_inicial_barra:.2f}"],
-            ["Posição Final da Barra de Regulação:", f"{posicao_final_barra:.2f}"],
-            ["Delta da Posição da Barra de Regulação:", f"{posicao_final_barra-posicao_inicial_barra:.2f}"],
-            ["Delta de Reatividade Encontrado (PCM):", reatividade_PCM],
-            ["Período encontrado (s):", f"{periodo:.2f}"],
-            ["Coeficientes da exponencial ajustada [a, b]:", [float(a),float(b)]],
-            ["Janela de tempo 1 (s):", "[" + f"{0:.2f}" + " , " + f"{janela1['tempo'][-1]:.2f}" + "]"],
-            ["Janela de tempo 2 (s):", "[" + f"{janela2['tempo'][0]:.2f}" + " , " + f"{janela2['tempo'][-1]:.2f}" + "]"],
-            ["Janela de tempo 3 (s):", "[" + f"{janela3['tempo'][0]:.2f}" + " , " + f"{janela3['tempo'][-1]:.2f}" + "]"],
-            ["Janela de tempo 4 (s):", "[" + f"{janela4['tempo'][0]:.2f}" + " , " + f"{janela4['tempo'][-1]:.2f}" + "]"],
-        ]
-        
-        # Define os títulos das colunas
-        col_labels = ['Descrição', 'Valor']
-        # Adiciona a tabela ao gráfico
-        plt.subplot(3, 1, 1)
-        ax = plt.gca()
-        ax.axis('off')  # Remove o eixo
-        plt.table(cellText=tabela_dados, colLabels=col_labels, loc='center', cellLoc='left', colColours=['lightgrey', 'lightgrey'])
-        
-        # Ajusta o layout para a tabela
-        plt.title(f'Relatório n° {indice_relatorio} de Inserção de Reatividade (BarraReg)', fontsize=16)
-        plt.subplots_adjust(left=0.1, right=0.9, top=0.7, bottom=0.2)  # Ajuste para deixar espaço para a tabela
-        
-        # Adiciona os gráficos abaixo da tabela
-        #plt.figure(figsize=(15, 10))  # Redefine o tamanho da figura para os gráficos
-        plt.subplot(3, 1, 2)
-        plt.plot(janela1['tempo'], janela1['posicao'], linestyle='-', color='r', label='Janela 1')
-        plt.plot(janela2['tempo'], janela2['posicao'], linestyle='-', color='b', label='Janela 2')
-        plt.plot(janela3['tempo'], janela3['posicao'], linestyle='-', color='g', label='Janela 3')
-        plt.plot(janela4['tempo'], janela4['posicao'], linestyle='-', color='y', label='Janela 4')
-        plt.xlabel('Tempo (s)')
-        plt.ylabel('Posição da Barra de Regulação')
-        plt.title('Posição da Barra de Regulação em função do Tempo')
-        plt.legend()
-        plt.grid(True)
-        
-        plt.subplot(3, 1, 3)
-        plt.plot(x_fit, y_fit, linestyle='-', color='purple', label='Regressão Exponencial')
-        plt.plot(janela1['tempo'], janela1['potencia'], linestyle='-', color='r', label='Janela 1')
-        plt.plot(janela2['tempo'], janela2['potencia'], linestyle='-', color='b', label='Janela 2')
-        plt.plot(janela3['tempo'], janela3['potencia'], linestyle='-', color='g', label='Janela 3')
-        plt.plot(janela4['tempo'], janela4['potencia'], linestyle='-', color='y', label='Janela 4')
-        plt.xlabel('Tempo (s)')
-        plt.ylabel('Potência (W)')
-        plt.title('Potência em função do Tempo')
-        plt.legend()
-        plt.grid(True)
-        
-        # Ajusta o layout para evitar sobreposição
-        plt.tight_layout()
-        
-        # Salva a figura no PDF
-        pdf.savefig()  
-        plt.close()
+        # Criação do PDF
+        with PdfPages(f'./tmp/{i}.pdf') as pdf:
+            
+            # Criação da figura
+            plt.figure(figsize=(8.27, 11.69))
+            
+            # Adiciona a tabela na figura
+            tabela_dados = [
+                ["Posição Inicial da Barra de Regulação:", f"{posicao_inicial_barra:.2f}"],
+                ["Posição Final da Barra de Regulação:", f"{posicao_final_barra:.2f}"],
+                ["Delta da Posição da Barra de Regulação:", f"{posicao_final_barra-posicao_inicial_barra:.2f}"],
+                ["Delta de Reatividade Encontrado (PCM):", reatividade_PCM],
+                ["Período encontrado (s):", f"{periodo:.2f}"],
+                ["Coeficientes da exponencial ajustada [a, b]:", [float(a),float(b)]],
+                ["Janela de tempo 1 (s):", "[" + f"{0:.2f}" + " , " + f"{janela1['tempo'][-1]:.2f}" + "]"],
+                ["Janela de tempo 2 (s):", "[" + f"{janela2['tempo'][0]:.2f}" + " , " + f"{janela2['tempo'][-1]:.2f}" + "]"],
+                ["Janela de tempo 3 (s):", "[" + f"{janela3['tempo'][0]:.2f}" + " , " + f"{janela3['tempo'][-1]:.2f}" + "]"],
+                ["Janela de tempo 4 (s):", "[" + f"{janela4['tempo'][0]:.2f}" + " , " + f"{janela4['tempo'][-1]:.2f}" + "]"],
+            ]
+            
+            # Define os títulos das colunas
+            col_labels = ['Descrição', 'Valor']
+            # Adiciona a tabela ao gráfico
+            plt.subplot(3, 1, 1)
+            ax = plt.gca()
+            ax.axis('off')  # Remove o eixo
+            plt.table(cellText=tabela_dados, colLabels=col_labels, loc='center', cellLoc='left', colColours=['lightgrey', 'lightgrey'])
+            
+            # Ajusta o layout para a tabela
+            plt.title(f'Relatório n° {indice_relatorio} de Inserção de Reatividade (BarraReg)', fontsize=16)
+            plt.subplots_adjust(left=0.1, right=0.9, top=0.7, bottom=0.2)  # Ajuste para deixar espaço para a tabela
+            
+            # Adiciona os gráficos abaixo da tabela
+            #plt.figure(figsize=(15, 10))  # Redefine o tamanho da figura para os gráficos
+            plt.subplot(3, 1, 2)
+            plt.plot(janela1['tempo'], janela1['posicao'], linestyle='-', color='r', label='Janela 1')
+            plt.plot(janela2['tempo'], janela2['posicao'], linestyle='-', color='b', label='Janela 2')
+            plt.plot(janela3['tempo'], janela3['posicao'], linestyle='-', color='g', label='Janela 3')
+            plt.plot(janela4['tempo'], janela4['posicao'], linestyle='-', color='y', label='Janela 4')
+            plt.xlabel('Tempo (s)')
+            plt.ylabel('Posição da Barra de Regulação')
+            plt.title('Posição da Barra de Regulação em função do Tempo')
+            plt.legend()
+            plt.grid(True)
+            
+            plt.subplot(3, 1, 3)
+            plt.plot(x_fit, y_fit, linestyle='-', color='purple', label='Regressão Exponencial')
+            plt.plot(janela1['tempo'], janela1['potencia'], linestyle='-', color='r', label='Janela 1')
+            plt.plot(janela2['tempo'], janela2['potencia'], linestyle='-', color='b', label='Janela 2')
+            plt.plot(janela3['tempo'], janela3['potencia'], linestyle='-', color='g', label='Janela 3')
+            plt.plot(janela4['tempo'], janela4['potencia'], linestyle='-', color='y', label='Janela 4')
+            plt.xlabel('Tempo (s)')
+            plt.ylabel('Potência (W)')
+            plt.title('Potência em função do Tempo')
+            plt.legend()
+            plt.grid(True)
+            
+            # Ajusta o layout para evitar sobreposição
+            plt.tight_layout()
+            
+            # Salva a figura no PDF
+            pdf.savefig()  
+            plt.close()
     
     return posicao_inicial_barra, posicao_final_barra, reatividade_PCM 
 
@@ -377,7 +393,7 @@ def main():
     else:
         pdfname = "report.pdf"
     
-    dBar_dRea = [(np.float64(186.97496365817088), np.float64(186.97496365817088),   np.float64(0))]
+    dBar_dRea = [(np.float64(186), np.float64(186),   np.float64(0))]
     #dBar_dRea = []
     #Se estiver no modo teste, pegar valores de exemplo
     if args.test:
@@ -400,7 +416,7 @@ def main():
                 shutil.rmtree('./tmp')
             os.makedirs('./tmp',exist_ok=True)
             for i, name in enumerate(args.files):
-                calculate_dBar_dRea(name,1, f'./tmp/{i}.pdf')
+                calculate_dBar_dRea(name,1)
             concatenate_pdfs(pdfname)
             sys.exit()
     else:
@@ -410,7 +426,7 @@ def main():
                 shutil.rmtree('./tmp')
             os.makedirs('./tmp',exist_ok=True)
             for i, name in enumerate(args.files):
-                dBar_dRea.append(calculate_dBar_dRea(name, i+1, f'./tmp/{i}.pdf'))
+                dBar_dRea.append(calculate_dBar_dRea(name, i+1))
         else:
             parser.print_help()
             sys.exit()
