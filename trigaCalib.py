@@ -29,222 +29,395 @@ import sys
 import os
 from PyPDF2 import PdfMerger
 
-def concatenate_pdfs(output_filename):
-    tmp_dir = './tmp'
+
+class trigaCalib:
+    dBar_dRea = []
+    indice_relatorio = 0
     
-    # Lista todos os arquivos PDF na pasta tmp
-    pdf_files = [os.path.join(tmp_dir, f) for f in os.listdir(tmp_dir) if f.endswith('.pdf')]
-    
-    # Ordenar os arquivos com o PDF 'final.pdf' no início e os outros em ordem numérica
-    pdf_files.sort(key=lambda x: (not x.endswith('final.pdf'), int(os.path.splitext(os.path.basename(x))[0]) if os.path.splitext(os.path.basename(x))[0].isdigit() else float('inf')))
-
-    # Cria um PdfMerger para combinar os PDFs
-    merger = PdfMerger()
-
-    for pdf in pdf_files:
-        merger.append(pdf)
-
-    merger.write(output_filename)
-    merger.close()
-    shutil.rmtree(tmp_dir)
-
-def calculate_dBar_dRea(caminho_arquivo,indice_relatorio,janela=10, valor_cruzamento_positivo=3, valor_cruzamento_negativo=-3, tempo_acomodacao=60):
-    """
-    Ler arquivo CSV
-    Descobrir se colunas de tempo do PLC estão disponíveis (PLC_CONV_TIME_ ou PLC_ORIG_TIME_) e importar dados
-    Descobrir se coluna de barra de regulação está disponível (PLC_CONV_BarraCon) e importar dados
-    Descobrir se coluna do canal logaritimo aquisição logarítima está disponível (PLC_CONV_CLogALog) e importar dados
-    Converter colunas de tempo disponíveis em segundos
-    Tirar offset de tempo (inicio da aquisição se torna 0s)
-    Remover tempos repetidos
-    Derivar barra de controle 
-    Achar tempo que cruza limiar de velocidade positivo
-    Achar tempo que cruza limiar de velocidade negativo 
-
-    Extrair janelas de tempo
-        Janela 1: prova de criticalidade
-        Janela 2: subida de barra
-        Janela 3: acomodação de nêutrons atrasados
-        Janela 4: período estável
-
-    Fazer média da posição de barra da janela 1
-    Fazer média da posição de barra da janela 3 e 4
-    Calcular delta de barra
-    Regressão linear na janela 4
-    Calcular período
-    Calcular reatividade
-
-    Gerar PDF com tabelas e gráficos
-    Retornar barra_inicial, barra_final e deltaRearividade
-
-    """
-    dados = {}
-    
-    # Ler arquivo CSV
-    df = pd.read_csv(caminho_arquivo, delimiter=';')
-    
-    # Descobrir se colunas de tempo do PLC estão disponíveis (PLC_CONV_TIME_ ou PLC_ORIG_TIME_) e importar dados
-    if 'PLC_CONV_TIME_S' in df.columns:
-        tempo = df['PLC_CONV_TIME_S'].values
-        if 'PLC_CONV_TIME_H' in df.columns:
-            tempo += df['PLC_CONV_TIME_H'].values*3600
-        if 'PLC_CONV_TIME_Mi' in df.columns:
-            tempo += df['PLC_CONV_TIME_Mi'].values*60
-        if 'PLC_CONV_TIME_MS' in df.columns:
-            tempo = tempo.astype(float) + df['PLC_CONV_TIME_MS'].values/1000
-    elif 'PLC_ORIG_TIME_S' in df.columns:
-        tempo = df['PLC_ORIG_TIME_S'].values
-        if 'PLC_ORIG_TIME_H' in df.columns:
-            tempo += df['PLC_ORIG_TIME_H'].values*3600
-        if 'PLC_ORIG_TIME_Mi' in df.columns:
-            tempo += df['PLC_ORIG_TIME_Mi'].values*60
-        if 'PLC_ORIG_TIME_MS' in df.columns:
-            tempo = tempo.astype(float) + df['PLC_ORIG_TIME_MS'].values/1000
-    else:
-        print("Error: import PLC_CONV_TIME_S or PLC_ORIG_TIME_S from ", caminho_arquivo)
-        return None
-    
-    dados['tempo'] = tempo - tempo[1]
-    
-    # Descobrir se coluna de barra de regulação está disponível (PLC_CONV_BarraCon) e importar dados
-    if 'PLC_CONV_BarraCon' in df.columns:
-        dados['posicao'] = df['PLC_CONV_BarraReg'].values
-    else:
-        print("Error: import PLC_CONV_BarraCon from ", caminho_arquivo)
-        return None
-    
-    # Descobrir se coluna do canal logaritimo aquisição logarítima está disponível (PLC_CONV_CLogALog) e importar dados
-    if 'PLC_CONV_CLogALog' in df.columns:
-        dados['potencia'] = df['PLC_CONV_CLogALog'].values
-    else:
-        print("Error: import PLC_CONV_CLogALog from ", caminho_arquivo)
-        return None
-    
-    # Remover tempos repetidos
-    tempo = [dados['tempo'][0]]
-    posicao = [dados['posicao'][0]]
-    potencia = [dados['potencia'][0]]
-    for i in range(1, len(dados['tempo'])):
-        if dados['tempo'][i] != dados['tempo'][i - 1]:
-            tempo.append(dados['tempo'][i])
-            posicao.append(dados['posicao'][i])
-            potencia.append(dados['potencia'][i])
-    dados['tempo'] = np.array(tempo)
-    dados['posicao'] = np.array(posicao)
-    dados['potencia'] = np.array(potencia)
-
-    # Aplicar filtro de média móvel na posição da barra e derivar
-    filtro = np.ones(janela) / janela
-    posicao_filtrada = np.convolve(dados['posicao'], filtro, mode='same')
-    derivada_posicao = np.diff(posicao_filtrada) / np.diff(dados['tempo'])
-    derivada_posicao = np.insert(derivada_posicao, 0, np.nan) # Para que a derivada tenha o mesmo comprimento que os dados originais, podemos adicionar um NaN no início
-
-    # Deleta a quantidade de janela da primeira e ultimas posições
-    tempo_cortado = dados['tempo'][janela:-janela]
-    derivada_posicao_cortada = derivada_posicao[janela:-janela]
-
-
-
-
-
-    #plt.plot(tempo_cortado, derivada_posicao_cortada, label='Derivada', color='blue')
-    #plt.xlabel('tempo')
-    #plt.ylabel('Derivada')
-    #plt.title('Derivada da posição da barra')
-    #plt.legend()
-    #plt.grid(True)
-    #plt.show()
-
-    # Calcular tempos de cruzamento positivo
-    cruzamentos_acima_positivo = []
-    cruzamentos_abaixo_positivo = []
-    for i in range(1, len(derivada_posicao_cortada)):
-        if derivada_posicao_cortada[i - 1] <= valor_cruzamento_positivo < derivada_posicao_cortada[i]:
-            cruzamentos_acima_positivo.append(tempo_cortado[i])
-        elif derivada_posicao_cortada[i - 1] > valor_cruzamento_positivo >= derivada_posicao_cortada[i]:
-            cruzamentos_abaixo_positivo.append(tempo_cortado[i])
-    
-    # Calcular tempos de cruzamento negativo
-    cruzamentos_acima_negativo = []
-    cruzamentos_abaixo_negativo = []
-    for i in range(1, len(derivada_posicao_cortada)):
-        if derivada_posicao_cortada[i - 1] <= valor_cruzamento_negativo < derivada_posicao_cortada[i]:
-            cruzamentos_acima_negativo.append(tempo_cortado[i])
-        elif derivada_posicao_cortada[i - 1] > valor_cruzamento_negativo >= derivada_posicao_cortada[i]:
-            cruzamentos_abaixo_negativo.append(tempo_cortado[i])
-    
-    print(len(cruzamentos_acima_positivo), "\t", cruzamentos_acima_positivo)
-    print()
-    print(len(cruzamentos_abaixo_positivo), "\t", cruzamentos_abaixo_positivo)
-    print()
-    print(len(cruzamentos_abaixo_negativo), "\t", cruzamentos_abaixo_negativo)
-    print()
-    print(len(cruzamentos_acima_negativo), "\t", cruzamentos_acima_negativo)
-    print()
-
-    for i in range(0,len(cruzamentos_acima_positivo)):
-        # Definir as janelas de tempo
-        janela1 = {
-            'tempo': dados['tempo'][dados['tempo'] <= cruzamentos_acima_positivo[i]],
-            'posicao': dados['posicao'][dados['tempo'] <= cruzamentos_acima_positivo[i]],
-            'potencia': dados['potencia'][dados['tempo'] <= cruzamentos_acima_positivo[i]]
-        }
-
-        janela2 = {
-            'tempo': dados['tempo'][(dados['tempo'] > cruzamentos_acima_positivo[i]) & (dados['tempo'] <= cruzamentos_abaixo_positivo[i])],
-            'posicao': dados['posicao'][(dados['tempo'] > cruzamentos_acima_positivo[i]) & (dados['tempo'] <= cruzamentos_abaixo_positivo[i])],
-            'potencia': dados['potencia'][(dados['tempo'] > cruzamentos_acima_positivo[i]) & (dados['tempo'] <= cruzamentos_abaixo_positivo[i])]
-        }
-
-        tempo_apos_cruzamento = cruzamentos_abaixo_positivo[i] + tempo_acomodacao
-        indice_mais_proximo = np.abs(dados['tempo'] - tempo_apos_cruzamento).argmin()
-        janela3 = {
-            'tempo': dados['tempo'][(dados['tempo'] > cruzamentos_abaixo_positivo[i]) & (dados['tempo'] <= dados['tempo'][indice_mais_proximo])],
-            'posicao': dados['posicao'][(dados['tempo'] > cruzamentos_abaixo_positivo[i]) & (dados['tempo'] <= dados['tempo'][indice_mais_proximo])],
-            'potencia': dados['potencia'][(dados['tempo'] > cruzamentos_abaixo_positivo[i]) & (dados['tempo'] <= dados['tempo'][indice_mais_proximo])]
-        }
-
-        #if len(cruzamentos_acima_positivo) >= 2 and len(cruzamentos_abaixo_negativo) >= 1:
-        #    if cruzamentos_acima_positivo[i+1] > cruzamentos_abaixo_negativo[0]:
-        #        final_janela4 = cruzamentos_abaixo_negativo[0]
-        #    else:
-        #        final_janela4 = cruzamentos_acima_positivo[i+1]
-        #else:
-        #    if len(cruzamentos_acima_positivo) >= 2:
-        #        final_janela4 = cruzamentos_acima_positivo[i+1]
-        #    elif len(cruzamentos_abaixo_negativo) >= 1:
-        #        final_janela4 = cruzamentos_abaixo_negativo[0]
-        #    else:
-        #        final_janela4 = dados['tempo'][-1]
+    def concatenate_pdfs(self, output_filename):
+        tmp_dir = './tmp'
         
-        if len(cruzamentos_acima_positivo) >= 2 and i != (len(cruzamentos_acima_positivo) - 1):
-                final_janela4 = cruzamentos_acima_positivo[i+1]
+        # Lista todos os arquivos PDF na pasta tmp
+        pdf_files = [os.path.join(tmp_dir, f) for f in os.listdir(tmp_dir) if f.endswith('.pdf')]
+        
+        # Ordenar os arquivos com o PDF 'final.pdf' no início e os outros em ordem numérica
+        pdf_files.sort(key=lambda x: (not x.endswith('final.pdf'), int(os.path.splitext(os.path.basename(x))[0]) if os.path.splitext(os.path.basename(x))[0].isdigit() else float('inf')))
+
+        # Cria um PdfMerger para combinar os PDFs
+        merger = PdfMerger()
+
+        for pdf in pdf_files:
+            merger.append(pdf)
+
+        merger.write(output_filename)
+        merger.close()
+        shutil.rmtree(tmp_dir)
+
+    def process_file_get_dBar_dRea(self, caminho_arquivo, simples):
+        """
+        Ler arquivo CSV
+        Descobrir se colunas de tempo do PLC estão disponíveis (PLC_CONV_TIME_ ou PLC_ORIG_TIME_) e importar dados
+        Descobrir se coluna de barra de regulação está disponível (PLC_CONV_BarraCon) e importar dados
+        Descobrir se coluna do canal logaritimo aquisição logarítima está disponível (PLC_CONV_CLogALog) e importar dados
+        Converter colunas de tempo disponíveis em segundos
+        Tirar offset de tempo (inicio da aquisição se torna 0s)
+        Remover tempos repetidos
+        Derivar barra de controle 
+        Achar tempo que cruza limiar de velocidade positivo
+        Achar tempo que cruza limiar de velocidade negativo 
+
+        Extrair janelas de tempo
+            Janela 1: prova de criticalidade
+            Janela 2: subida de barra
+            Janela 3: acomodação de nêutrons atrasados
+            Janela 4: período estável
+
+        Fazer média da posição de barra da janela 1
+        Fazer média da posição de barra da janela 3 e 4
+        Calcular delta de barra
+        Regressão linear na janela 4
+        Calcular período
+        Calcular reatividade
+
+        Gerar PDF com tabelas e gráficos
+        Retornar barra_inicial, barra_final e deltaRearividade
+
+        """
+        dados       = self.import_file(caminho_arquivo)
+        self.plot_input_data(dados)
+        
+        cruzamentos = self.calcula_tempos_cruzamento(dados)
+        
+        if simples:
+            janela1, janela2, janela3, janela4, janela5 = self.gera_janela_simples(dados, cruzamentos, 15)
+            barra, reatividade_PCM = self.calculate_dBar_dRea(janela1, janela2, janela3, janela4, janela5)
+            self.dBar_dRea.append([barra['inicial'], barra['final'], reatividade_PCM])
         else:
-            final_janela4 = dados['tempo'][-1]
+            janela1, janela2, janela3, janela4, janela5 = self.gera_janela_multi(dados, cruzamentos)
+            for i in range(0,len(janela1)):
+                barra, reatividade_PCM = self.calculate_dBar_dRea(janela1[i], janela2[i], janela3[i], janela4[i], janela5[i])
+                self.dBar_dRea.append([barra['inicial'], barra['final'], reatividade_PCM])
+        
+    def import_file(self, caminho_arquivo):
+        
+        dados = {}
+        
+        # Ler arquivo CSV
+        df = pd.read_csv(caminho_arquivo, delimiter=';')
+        
+        # Descobrir se colunas de tempo do PLC estão disponíveis (PLC_CONV_TIME_ ou PLC_ORIG_TIME_) e importar dados
+        if 'PLC_CONV_TIME_S' in df.columns:
+            tempo = df['PLC_CONV_TIME_S'].values
+            if 'PLC_CONV_TIME_H' in df.columns:
+                tempo += df['PLC_CONV_TIME_H'].values*3600
+            if 'PLC_CONV_TIME_Mi' in df.columns:
+                tempo += df['PLC_CONV_TIME_Mi'].values*60
+            if 'PLC_CONV_TIME_MS' in df.columns:
+                tempo = tempo.astype(float) + df['PLC_CONV_TIME_MS'].values/1000
+        elif 'PLC_ORIG_TIME_S' in df.columns:
+            tempo = df['PLC_ORIG_TIME_S'].values
+            if 'PLC_ORIG_TIME_H' in df.columns:
+                tempo += df['PLC_ORIG_TIME_H'].values*3600
+            if 'PLC_ORIG_TIME_Mi' in df.columns:
+                tempo += df['PLC_ORIG_TIME_Mi'].values*60
+            if 'PLC_ORIG_TIME_MS' in df.columns:
+                tempo = tempo.astype(float) + df['PLC_ORIG_TIME_MS'].values/1000
+        else:
+            print("Error: import PLC_CONV_TIME_S or PLC_ORIG_TIME_S from ", caminho_arquivo)
+            return None
+        
+        dados['tempo'] = tempo - tempo[1]
+        
+        # Descobrir se coluna de barra de regulação está disponível (PLC_CONV_BarraCon) e importar dados
+        if 'PLC_CONV_BarraCon' in df.columns:
+            dados['posicao'] = df['PLC_CONV_BarraReg'].values
+        else:
+            print("Error: import PLC_CONV_BarraCon from ", caminho_arquivo)
+            return None
+        
+        # Descobrir se coluna do canal logaritimo aquisição logarítima está disponível (PLC_CONV_CLogALog) e importar dados
+        if 'PLC_CONV_CLogALog' in df.columns:
+            dados['potencia'] = df['PLC_CONV_CLogALog'].values
+        else:
+            print("Error: import PLC_CONV_CLogALog from ", caminho_arquivo)
+            return None
+        
+        # Remover tempos repetidos
+        tempo = [dados['tempo'][0]]
+        posicao = [dados['posicao'][0]]
+        potencia = [dados['potencia'][0]]
+        for i in range(1, len(dados['tempo'])):
+            if dados['tempo'][i] != dados['tempo'][i - 1]:
+                tempo.append(dados['tempo'][i])
+                posicao.append(dados['posicao'][i])
+                potencia.append(dados['potencia'][i])
+        dados['tempo'] = np.array(tempo)
+        dados['posicao'] = np.array(posicao)
+        dados['potencia'] = np.array(potencia)
+        
+        return dados
 
-        janela4 = {
-            'tempo': dados['tempo'][(dados['tempo'] > dados['tempo'][indice_mais_proximo]) & (dados['tempo'] <= final_janela4)],
-            'posicao': dados['posicao'][(dados['tempo'] > dados['tempo'][indice_mais_proximo]) & (dados['tempo'] <= final_janela4)],
-            'potencia': dados['potencia'][(dados['tempo'] > dados['tempo'][indice_mais_proximo]) & (dados['tempo'] <= final_janela4)]
+    def plot_input_data(self,dados):
+        # Criar uma figura e eixos com subplots
+        fig, ax = plt.subplots(2, 1, figsize=(10, 8))  # 2 linhas, 1 coluna
+
+        # Primeiro subplot: Posição em função do tempo
+        ax[0].plot(dados['tempo'], dados['posicao'], label='Posição', color='blue')
+        ax[0].set_xlabel('Tempo (s)')
+        ax[0].set_ylabel('Posição')
+        ax[0].set_title('Posição em função do tempo')
+        ax[0].legend()
+        ax[0].grid(True)
+
+        # Segundo subplot: Potência em função do tempo
+        ax[1].plot(dados['tempo'], dados['potencia'], label='Potência', color='green')
+        ax[1].set_xlabel('Tempo (s)')
+        ax[1].set_ylabel('Potência (W)')
+        ax[1].set_title('Potência em função do tempo')
+        ax[1].set_yscale('log')
+        ax[1].legend()
+        ax[1].grid(True)
+
+        # Ajustar layout e exibir a figura com os dois gráficos
+        plt.tight_layout()
+        plt.show()
+    
+    def calcula_tempos_cruzamento(self, dados, janela_filtro=10, valor_cruzamento_positivo=3, valor_cruzamento_negativo=-3):
+
+        # Aplicar filtro de média móvel na posição da barra e derivar
+        filtro = np.ones(janela_filtro) / janela_filtro
+        posicao_filtrada = np.convolve(dados['posicao'], filtro, mode='same')
+        derivada_posicao = np.diff(posicao_filtrada) / np.diff(dados['tempo'])
+        derivada_posicao = np.insert(derivada_posicao, 0, np.nan) # Para que a derivada tenha o mesmo comprimento que os dados originais, podemos adicionar um NaN no início
+
+        # Deleta a quantidade de janela da primeira e ultimas posições
+        dados_cortado_tempo = dados['tempo'][janela_filtro:-janela_filtro]
+        dados_cortado_derivada = derivada_posicao[janela_filtro:-janela_filtro]
+
+        #Descomentar para exibir grafico da derivada da posição
+        #plt.plot(dados_cortado_tempo, dados_cortado_derivada, label='Derivada', color='blue')
+        #plt.xlabel('tempo')
+        #plt.ylabel('Derivada')
+        #plt.title('Derivada da posição da barra')
+        #plt.legend()
+        #plt.grid(True)
+        #plt.show()
+
+        # Calcular tempos de cruzamento positivo
+        cruzamentos = {}
+        cruzamentos['acima_positivo']  = []
+        cruzamentos['abaixo_positivo'] = []
+        for i in range(1, len(dados_cortado_derivada)):
+            if dados_cortado_derivada[i - 1] <= valor_cruzamento_positivo < dados_cortado_derivada[i]:
+                cruzamentos['acima_positivo'].append(dados_cortado_tempo[i])
+            elif dados_cortado_derivada[i - 1] > valor_cruzamento_positivo >= dados_cortado_derivada[i]:
+                cruzamentos['abaixo_positivo'].append(dados_cortado_tempo[i])
+        
+        # Calcular tempos de cruzamento negativo
+        cruzamentos['acima_negativo']  = []
+        cruzamentos['abaixo_negativo'] = []
+        for i in range(1, len(dados_cortado_derivada)):
+            if dados_cortado_derivada[i - 1] <= valor_cruzamento_negativo < dados_cortado_derivada[i]:
+                cruzamentos['acima_negativo'].append(dados_cortado_tempo[i])
+            elif dados_cortado_derivada[i - 1] > valor_cruzamento_negativo >= dados_cortado_derivada[i]:
+                cruzamentos['abaixo_negativo'].append(dados_cortado_tempo[i])
+        
+        print(len(cruzamentos['acima_positivo']),  "acima_positivo:\t",  cruzamentos['acima_positivo'])
+        print(len(cruzamentos['abaixo_positivo']), "abaixo_positivo:\t", cruzamentos['abaixo_positivo'])
+        print(len(cruzamentos['abaixo_negativo']), "abaixo_negativo:\t", cruzamentos['abaixo_negativo'])
+        print(len(cruzamentos['acima_negativo']),  "acima_negativo:\t",  cruzamentos['acima_negativo'])
+        print()
+        
+        return cruzamentos
+
+    def gera_janela_simples(self, dados, cruzamentos, tempo_acomodacao=60):
+        """
+        Gera um único conjunto de janelas
+        A partir de uma segunda movimentação da barra, todos os dados são ignorados
+        """
+        # Verificar se há cruzamentos 'abaixo_negativo' e ajustar dados e cruzamentos
+        # (Se a barra foi movimentada para baixo)
+        if len(cruzamentos['abaixo_negativo']) >= 1:
+            tempo_maximo = cruzamentos['abaixo_negativo'][0]
+            dados = {
+                'tempo':    dados['tempo'][dados['tempo']    <= tempo_maximo],
+                'posicao':  dados['posicao'][dados['tempo']  <= tempo_maximo],
+                'potencia': dados['potencia'][dados['tempo'] <= tempo_maximo]
+            }
+            # Atualizar cruzamentos
+            cruzamentos['acima_positivo']  = [t for t in cruzamentos['acima_positivo']  if t <= tempo_maximo]
+            cruzamentos['abaixo_positivo'] = [t for t in cruzamentos['abaixo_positivo'] if t <= tempo_maximo]
+        
+        # remove tempos de cruzamento muito perto um do outro
+        i = 0
+        while i < len(cruzamentos['acima_positivo']) - 1:
+            if (cruzamentos['acima_positivo'][i + 1] - cruzamentos['acima_positivo'][i]) < tempo_acomodacao:
+                # Se a diferença é menor que tempo_acomodacao, remover o elemento i
+                cruzamentos['acima_positivo'].pop(i+1)#Remove o próximo muito perto
+            else:
+                i += 1
+
+        i = 0
+        while i < len(cruzamentos['abaixo_positivo']) - 1:
+            if (cruzamentos['abaixo_positivo'][i + 1] - cruzamentos['abaixo_positivo'][i]) < tempo_acomodacao:
+                # Se a diferença é menor que tempo_acomodacao, remover o elemento i
+                cruzamentos['abaixo_positivo'].pop(i)#Remove o anterior muito perto
+            else:
+                i += 1
+                
+        # Janela 1: 0 segundos até tempo_acomodacao
+        janela1 = {
+            'tempo':    dados['tempo'][dados['tempo']    <= (tempo_acomodacao + dados['tempo'][0])],
+            'posicao':  dados['posicao'][dados['tempo']  <= (tempo_acomodacao + dados['tempo'][0])],
+            'potencia': dados['potencia'][dados['tempo'] <= (tempo_acomodacao + dados['tempo'][0])]
         }
-        
-        posicao_inicial_barra = np.mean(janela1['posicao']) if len(janela1['posicao']) > 0 else np.nan
-        posicao_final_barra = np.mean(janela4['posicao']) if len(janela4['posicao']) > 0 else np.nan
 
-        #Deslocar tempo 0 para inicio da janela4
-        janela1['tempo'] -= dados['tempo'][indice_mais_proximo]
-        janela2['tempo'] -= dados['tempo'][indice_mais_proximo]
-        janela3['tempo'] -= dados['tempo'][indice_mais_proximo]
-        janela4['tempo'] -= dados['tempo'][indice_mais_proximo]
+        # Janela 2: tempo_acomodacao até cruzamentos['acima_positivo']
+        janela2 = {
+            'tempo':    dados['tempo'][(dados['tempo']    > tempo_acomodacao + dados['tempo'][0]) & (dados['tempo'] <= cruzamentos['acima_positivo'][0])],
+            'posicao':  dados['posicao'][(dados['tempo']  > tempo_acomodacao + dados['tempo'][0]) & (dados['tempo'] <= cruzamentos['acima_positivo'][0])],
+            'potencia': dados['potencia'][(dados['tempo'] > tempo_acomodacao + dados['tempo'][0]) & (dados['tempo'] <= cruzamentos['acima_positivo'][0])]
+        }
+
+        # Janela 3: cruzamentos['acima_positivo'] até cruzamentos['abaixo_positivo']
+        janela3 = {
+            'tempo':    dados['tempo'][(dados['tempo']    > cruzamentos['acima_positivo'][0]) & (dados['tempo'] <= cruzamentos['abaixo_positivo'][0])],
+            'posicao':  dados['posicao'][(dados['tempo']  > cruzamentos['acima_positivo'][0]) & (dados['tempo'] <= cruzamentos['abaixo_positivo'][0])],
+            'potencia': dados['potencia'][(dados['tempo'] > cruzamentos['acima_positivo'][0]) & (dados['tempo'] <= cruzamentos['abaixo_positivo'][0])]
+        }
+
+        # Janela 4: cruzamentos['abaixo_positivo'] até cruzamentos['abaixo_positivo'] + tempo_acomodacao
+        tempo_apos_cruzamento = cruzamentos['abaixo_positivo'][0] + tempo_acomodacao
+        janela4 = {
+            'tempo':    dados['tempo'][(dados['tempo']    > cruzamentos['abaixo_positivo'][0]) & (dados['tempo'] <= tempo_apos_cruzamento)],
+            'posicao':  dados['posicao'][(dados['tempo']  > cruzamentos['abaixo_positivo'][0]) & (dados['tempo'] <= tempo_apos_cruzamento)],
+            'potencia': dados['potencia'][(dados['tempo'] > cruzamentos['abaixo_positivo'][0]) & (dados['tempo'] <= tempo_apos_cruzamento)]
+        }
+
+        # Determinando o final da janela 5
+        # A partir de qualquer movimentação da barra de regulação, defina o final da janela
+        if len(cruzamentos['acima_positivo']) >= 2:
+            final_janela5 = cruzamentos['acima_positivo'][1]
+        else:
+            final_janela5 = dados['tempo'][-1]
+
+        # Janela 5: cruzamentos['abaixo_positivo'] + tempo_acomodacao até final_janela5
+        janela5 = {
+            'tempo':    dados['tempo'][(dados['tempo']    > tempo_apos_cruzamento) & (dados['tempo'] <= final_janela5)],
+            'posicao':  dados['posicao'][(dados['tempo']  > tempo_apos_cruzamento) & (dados['tempo'] <= final_janela5)],
+            'potencia': dados['potencia'][(dados['tempo'] > tempo_apos_cruzamento) & (dados['tempo'] <= final_janela5)]
+        }
+
+        return janela1, janela2, janela3, janela4, janela5
+
+            
+    def gera_janela_multi(self, dados, cruzamentos, tempo_acomodacao=60):
+        """
+        Gera vários conjuntos de janelas
+        Só analiza movimentações positivas, cada uma definindo uma janela
+        A partir de alguma movimentação negativa os dados são descartados
+        """
         
+        # Verificar se há cruzamentos 'abaixo_negativo' e ajustar dados e cruzamentos
+        # (Se a barra foi movimentada para baixo)
+        if len(cruzamentos['abaixo_negativo']) >= 1:
+            tempo_maximo = cruzamentos['abaixo_negativo'][0]
+            dados = {
+                'tempo':    dados['tempo'][dados['tempo']    <= tempo_maximo],
+                'posicao':  dados['posicao'][dados['tempo']  <= tempo_maximo],
+                'potencia': dados['potencia'][dados['tempo'] <= tempo_maximo]
+            }
+            # Atualizar cruzamentos
+            cruzamentos['acima_positivo']  = [t for t in cruzamentos['acima_positivo']  if t <= tempo_maximo]
+            cruzamentos['abaixo_positivo'] = [t for t in cruzamentos['abaixo_positivo'] if t <= tempo_maximo]
+        
+        # remove tempos de cruzamento muito perto um do outro
+        i = 0
+        while i < len(cruzamentos['acima_positivo']) - 1:
+            if (cruzamentos['acima_positivo'][i + 1] - cruzamentos['acima_positivo'][i]) < tempo_acomodacao:
+                # Se a diferença é menor que tempo_acomodacao, remover o elemento i
+                cruzamentos['acima_positivo'].pop(i+1)#Remove o próximo muito perto
+            else:
+                i += 1
+
+        i = 0
+        while i < len(cruzamentos['abaixo_positivo']) - 1:
+            if (cruzamentos['abaixo_positivo'][i + 1] - cruzamentos['abaixo_positivo'][i]) < tempo_acomodacao:
+                # Se a diferença é menor que tempo_acomodacao, remover o elemento i
+                cruzamentos['abaixo_positivo'].pop(i)#Remove o anterior muito perto
+            else:
+                i += 1
+        
+        janela1 = []
+        janela2 = []
+        janela3 = []
+        janela4 = []
+        janela5 = []
+        # Itera para cada cruzamentos positivos
+        for i in range(0,len(cruzamentos['acima_positivo'])):
+            cruzamento = {}
+            cruzamento['acima_positivo']  = [cruzamentos['acima_positivo'][i]]
+            cruzamento['abaixo_positivo'] = [cruzamentos['abaixo_positivo'][i]]
+            cruzamento['acima_negativo']  = []
+            cruzamento['abaixo_negativo'] = []
+            
+            #print(len(cruzamento['acima_positivo']),  "acima_positivo:\t",  cruzamento['acima_positivo'])
+            #print(len(cruzamento['abaixo_positivo']),  "abaixo_positivo:\t",  cruzamento['abaixo_positivo'])
+            
+            # Cortar Inicio
+            if(i>0):
+                dados_cortados = {
+                    'tempo':    dados['tempo'][dados['tempo']    >= cruzamentos['abaixo_positivo'][i-1]],
+                    'posicao':  dados['posicao'][dados['tempo']  >= cruzamentos['abaixo_positivo'][i-1]],
+                    'potencia': dados['potencia'][dados['tempo'] >= cruzamentos['abaixo_positivo'][i-1]]
+                }
+            else:
+                dados_cortados = dados
+            
+            #Cortar final
+            if(i<len(cruzamentos['acima_positivo'])-1):
+                dados_cortados = {
+                    'tempo':    dados_cortados['tempo'][dados_cortados['tempo']    <= cruzamentos['acima_positivo'][i+1]],
+                    'posicao':  dados_cortados['posicao'][dados_cortados['tempo']  <= cruzamentos['acima_positivo'][i+1]],
+                    'potencia': dados_cortados['potencia'][dados_cortados['tempo'] <= cruzamentos['acima_positivo'][i+1]]
+                }
+                
+            #print("dados_cortados:\t",dados_cortados)
+            j1, j2, j3, j4, j5 = self.gera_janela_simples(dados_cortados, cruzamento, tempo_acomodacao)
+            #print("j1:\t",j1)
+            janela1.append(j1)
+            janela2.append(j2)
+            janela3.append(j3)
+            janela4.append(j4)
+            janela5.append(j5)
+        return janela1, janela2, janela3, janela4, janela5
+        
+
+    def calculate_dBar_dRea(self, janela1, janela2, janela3, janela4, janela5):
+        barra = {}
+        barra['inicial'] = np.mean(janela2['posicao']) if len(janela2['posicao']) > 0 else np.nan
+        barra['final']   = np.mean(janela5['posicao']) if len(janela5['posicao']) > 0 else np.nan
         # Regressão exponencial
         def exponencial(x, a, b):
             return a * np.exp(b * x)
-        popt, pcov = curve_fit(exponencial, janela4['tempo'], janela4['potencia'], p0=[1, 0.01]) # p0 são os valores iniciais para a otimização
-        a, b = popt
+        # Gerar dados ajustados para visualização
+        popt2, pcov2 = curve_fit(exponencial, janela2['tempo'], janela2['potencia'], p0=[1, 0.01]) # p0 são os valores iniciais para a otimização
+        popt5, pcov5 = curve_fit(exponencial, janela5['tempo'], janela5['potencia'], p0=[1, 0.01]) # p0 são os valores iniciais para a otimização
+        x_fit2 = np.linspace(min(janela1['tempo']), max(janela3['tempo']), 100)
+        y_fit2 = exponencial(x_fit2, *popt2)
+        x_fit5 = np.linspace(min(janela3['tempo']), max(janela5['tempo']), 100)
+        y_fit5 = exponencial(x_fit5, *popt5)
+                                             #janela2['tempo'] - janela2['tempo'][0]
+        popt2, pcov2 = curve_fit(exponencial, janela2['tempo']- janela2['tempo'][0], janela2['potencia'], p0=[1, 0.01]) # p0 são os valores iniciais para a otimização
+        popt5, pcov5 = curve_fit(exponencial, janela5['tempo']- janela5['tempo'][0], janela5['potencia'], p0=[1, 0.01]) # p0 são os valores iniciais para a otimização
+        a2, b2 = popt2
+        a5, b5 = popt5
+        
+        
         
         # Calcaular periodo
-        periodo = 1/b    
+        periodo2 = 1/b2
+        periodo5 = 1/b5
 
         # Calular reatividade
         Beff = 0.007
@@ -261,36 +434,46 @@ def calculate_dBar_dRea(caminho_arquivo,indice_relatorio,janela=10, valor_cruzam
         A5   = 1.136306853
         B6   = 0.00027
         A6   = 3.013683394
-        reatividade_PCM  = 100000*((l/periodo)
-                                +(B1/(1+A1*periodo))
-                                +(B2/(1+A2*periodo))
-                                +(B3/(1+A3*periodo))
-                                +(B4/(1+A4*periodo))
-                                +(B5/(1+A5*periodo))
-                                +(B6/(1+A6*periodo)))
-        
-        # Gerar dados ajustados para visualização
-        x_fit = np.linspace(min(janela2['tempo']), max(janela4['tempo']), 100)
-        y_fit = exponencial(x_fit, *popt)
-
+        reatividade_PCM2  = 100000*((l/periodo2)
+                                +(B1/(1+A1*periodo2))
+                                +(B2/(1+A2*periodo2))
+                                +(B3/(1+A3*periodo2))
+                                +(B4/(1+A4*periodo2))
+                                +(B5/(1+A5*periodo2))
+                                +(B6/(1+A6*periodo2)))
+        reatividade_PCM5  = 100000*((l/periodo5)
+                                +(B1/(1+A1*periodo5))
+                                +(B2/(1+A2*periodo5))
+                                +(B3/(1+A3*periodo5))
+                                +(B4/(1+A4*periodo5))
+                                +(B5/(1+A5*periodo5))
+                                +(B6/(1+A6*periodo5)))
+        dRea = reatividade_PCM5-reatividade_PCM2
         # Criação do PDF
-        with PdfPages(f'./tmp/{i}.pdf') as pdf:
+        self.indice_relatorio += 1
+        
+        with PdfPages(f'./tmp/{self.indice_relatorio}.pdf') as pdf:
             
             # Criação da figura
             plt.figure(figsize=(8.27, 11.69))
             
             # Adiciona a tabela na figura
             tabela_dados = [
-                ["Posição Inicial da Barra de Regulação:", f"{posicao_inicial_barra:.2f}"],
-                ["Posição Final da Barra de Regulação:", f"{posicao_final_barra:.2f}"],
-                ["Delta da Posição da Barra de Regulação:", f"{posicao_final_barra-posicao_inicial_barra:.2f}"],
-                ["Delta de Reatividade Encontrado (PCM):", reatividade_PCM],
-                ["Período encontrado (s):", f"{periodo:.2f}"],
-                ["Coeficientes da exponencial ajustada [a, b]:", [float(a),float(b)]],
-                ["Janela de tempo 1 (s):", "[" + f"{0:.2f}" + " , " + f"{janela1['tempo'][-1]:.2f}" + "]"],
+                ["Posição Inicial da Barra de Regulação:",  f"{barra['inicial']:.2f}"],
+                ["Posição Final da Barra de Regulação:",    f"{barra['final']:.2f}"],
+                ["Delta da Posição da Barra de Regulação:", f"{barra['final'] - barra['inicial']:.2f}"],
+                ["Reatividade Inicial Encontrada (PCM):", reatividade_PCM2],
+                ["Reatividade Final Encontrada (PCM):", reatividade_PCM5],
+                ["Delta de Reatividade Encontrado (PCM):", dRea],
+                ["Período Inicial Encontrado (s):", f"{periodo2:.2f}"],
+                ["Período Final Encontrado (s):", f"{periodo5:.2f}"],
+                ["Coeficientes da exponencial ajustada 2 [a, b]:", [float(a2),float(b2)]],
+                ["Coeficientes da exponencial ajustada 5 [a, b]:", [float(a5),float(b5)]],
+                ["Janela de tempo 1 (s):", "[" + f"{janela1['tempo'][0]:.2f}" + " , " + f"{janela1['tempo'][-1]:.2f}" + "]"],
                 ["Janela de tempo 2 (s):", "[" + f"{janela2['tempo'][0]:.2f}" + " , " + f"{janela2['tempo'][-1]:.2f}" + "]"],
                 ["Janela de tempo 3 (s):", "[" + f"{janela3['tempo'][0]:.2f}" + " , " + f"{janela3['tempo'][-1]:.2f}" + "]"],
                 ["Janela de tempo 4 (s):", "[" + f"{janela4['tempo'][0]:.2f}" + " , " + f"{janela4['tempo'][-1]:.2f}" + "]"],
+                ["Janela de tempo 5 (s):", "[" + f"{janela5['tempo'][0]:.2f}" + " , " + f"{janela5['tempo'][-1]:.2f}" + "]"],
             ]
             
             # Define os títulos das colunas
@@ -302,16 +485,17 @@ def calculate_dBar_dRea(caminho_arquivo,indice_relatorio,janela=10, valor_cruzam
             plt.table(cellText=tabela_dados, colLabels=col_labels, loc='center', cellLoc='left', colColours=['lightgrey', 'lightgrey'])
             
             # Ajusta o layout para a tabela
-            plt.title(f'Relatório n° {indice_relatorio} de Inserção de Reatividade (BarraReg)', fontsize=16)
+            plt.title(f'Relatório n° {self.indice_relatorio} de Inserção de Reatividade (BarraReg)', fontsize=16)
             plt.subplots_adjust(left=0.1, right=0.9, top=0.7, bottom=0.2)  # Ajuste para deixar espaço para a tabela
             
             # Adiciona os gráficos abaixo da tabela
             #plt.figure(figsize=(15, 10))  # Redefine o tamanho da figura para os gráficos
             plt.subplot(3, 1, 2)
             plt.plot(janela1['tempo'], janela1['posicao'], linestyle='-', color='r', label='Janela 1')
-            plt.plot(janela2['tempo'], janela2['posicao'], linestyle='-', color='b', label='Janela 2')
+            plt.plot(janela2['tempo'], janela2['posicao'], linestyle='-', color='y', label='Janela 2')
             plt.plot(janela3['tempo'], janela3['posicao'], linestyle='-', color='g', label='Janela 3')
-            plt.plot(janela4['tempo'], janela4['posicao'], linestyle='-', color='y', label='Janela 4')
+            plt.plot(janela4['tempo'], janela4['posicao'], linestyle='-', color='b', label='Janela 4')
+            plt.plot(janela5['tempo'], janela5['posicao'], linestyle='-', color='purple', label='Janela 5')
             plt.xlabel('Tempo (s)')
             plt.ylabel('Posição da Barra de Regulação')
             plt.title('Posição da Barra de Regulação em função do Tempo')
@@ -319,11 +503,13 @@ def calculate_dBar_dRea(caminho_arquivo,indice_relatorio,janela=10, valor_cruzam
             plt.grid(True)
             
             plt.subplot(3, 1, 3)
-            plt.plot(x_fit, y_fit, linestyle='-', color='purple', label='Regressão Exponencial')
+            plt.plot(x_fit2, y_fit2, linestyle='-', color='orange', label='Regressão Exponencial 2')
+            plt.plot(x_fit5, y_fit5, linestyle='-', color='orange', label='Regressão Exponencial 5')
             plt.plot(janela1['tempo'], janela1['potencia'], linestyle='-', color='r', label='Janela 1')
-            plt.plot(janela2['tempo'], janela2['potencia'], linestyle='-', color='b', label='Janela 2')
+            plt.plot(janela2['tempo'], janela2['potencia'], linestyle='-', color='y', label='Janela 2')
             plt.plot(janela3['tempo'], janela3['potencia'], linestyle='-', color='g', label='Janela 3')
-            plt.plot(janela4['tempo'], janela4['potencia'], linestyle='-', color='y', label='Janela 4')
+            plt.plot(janela4['tempo'], janela4['potencia'], linestyle='-', color='b', label='Janela 4')
+            plt.plot(janela5['tempo'], janela5['potencia'], linestyle='-', color='purple', label='Janela 5')
             plt.xlabel('Tempo (s)')
             plt.ylabel('Potência (W)')
             plt.title('Potência em função do Tempo')
@@ -336,11 +522,52 @@ def calculate_dBar_dRea(caminho_arquivo,indice_relatorio,janela=10, valor_cruzam
             # Salva a figura no PDF
             pdf.savefig()  
             plt.close()
+        return barra, dRea
     
-    return posicao_inicial_barra, posicao_final_barra, reatividade_PCM 
+    
+    def gerar_grafico_calibracao(self, dBar_dRea, gpoly):
+        # Converter os dados para arrays numpy
+        #x = np.array([row[1] for row in dBar_dRea])  # Segunda coluna
+        x = np.array([
+            row[1] 
+            for row in dBar_dRea 
+            if row is not None and isinstance(row, (list, tuple)) and len(row) > 1
+        ])
+        #x = np.array([(row[0] + row[1]) / 2 for row in dBar_dRea])
+        dy = np.array([row[2] for row in dBar_dRea])  # Terceira coluna
+        y = np.cumsum(dy)
+        
+        
+        
+        # Regreção linear com o grau do polinômio especificado
+        coeffs = np.polyfit(x, y, gpoly)
+        poly = np.poly1d(coeffs)
 
-#def calibBarReg():
-#    calculate_dBar_dRea('aqui3-100cut.csv','relatorio.pdf')
+        # Gerar valores para plotagem
+        x_fit = np.linspace(min(x), max(x), 100)
+        y_fit = poly(x_fit)
+
+        from reportlab.lib.pagesizes import A4
+        from reportlab.pdfgen import canvas
+        from reportlab.lib.units import inch
+        import matplotlib.backends.backend_pdf
+
+        os.makedirs('./tmp',exist_ok=True)
+        c = canvas.Canvas("./tmp/final.pdf", pagesize=A4)
+        c.drawString(72, 800, "Página Inicial A4")  # Adiciona um texto simples
+        c.showPage()
+        c.save()
+
+        with matplotlib.backends.backend_pdf.PdfPages("./tmp/final.pdf") as pdf_pages:
+            plt.figure(figsize=(8.27, 11.69))  # Tamanho A4 em polegadas (8.27 x 11.69)
+            plt.scatter(x, y, color='red', label='dP/dR')
+            plt.plot(x_fit, y_fit, label=f'Ajuste Polinomial ({gpoly}º Grau)', color='blue')
+            plt.xlabel('Posição de Barra')
+            plt.ylabel('Reatividade')
+            plt.title('Reatividade em função da posição de barra')
+            plt.legend()
+            plt.grid(True)
+            pdf_pages.savefig()  # Salva o gráfico no PDF
 
 def main():
     """
@@ -370,6 +597,7 @@ def main():
     904   0 486
     """
     
+    calib = trigaCalib()
 
     # Configurar o argparse para capturar os argumentos de linha de comando
     parser = argparse.ArgumentParser(description='Realizar calibração das barras de controle a partir de arquivos de aquisição de dados CSV')
@@ -393,12 +621,10 @@ def main():
     else:
         pdfname = "report.pdf"
     
-    dBar_dRea = [(np.float64(186), np.float64(186),   np.float64(0))]
-    #dBar_dRea = []
     #Se estiver no modo teste, pegar valores de exemplo
     if args.test:
         # Dados extraidos da calibração de 2023 (reatividade em centavos)
-        dBar_dRea = [
+        calib.dBar_dRea = [
             [150, 150,    0],
             [150, 250, 34.0],
             [250, 350, 58.5], 
@@ -409,71 +635,31 @@ def main():
             [681, 771, 38.7],
             [771, 904, 30.4],
             ]
-    elif args.report:
-        #Apenas gerar o relatório dos arquivos de entrada
-        if args.files:
-            if os.path.exists('./tmp'):
-                shutil.rmtree('./tmp')
-            os.makedirs('./tmp',exist_ok=True)
-            for i, name in enumerate(args.files):
-                calculate_dBar_dRea(name,1)
-            concatenate_pdfs(pdfname)
-            sys.exit()
     else:
         #Obter o delta de barra e reatividade a partir dos arquivos de entrada
         if args.files:
             if os.path.exists('./tmp'):
                 shutil.rmtree('./tmp')
             os.makedirs('./tmp',exist_ok=True)
+            calib.dBar_dRea.append([np.float64(186), np.float64(186),   np.float64(0)])
             for i, name in enumerate(args.files):
-                dBar_dRea.append(calculate_dBar_dRea(name, i+1))
+                calib.process_file_get_dBar_dRea(caminho_arquivo=name, simples=False)
+            # Caso apenas gerar o relatório dos arquivos de entrada
+            if args.report: 
+                calib.concatenate_pdfs(pdfname)
+                sys.exit()
         else:
             parser.print_help()
             sys.exit()
-        
-    # Converter os dados para arrays numpy
-    #print(dBar_dRea)
-    x = np.array([row[1] for row in dBar_dRea])  # Segunda coluna
-    #x = np.array([(row[0] + row[1]) / 2 for row in dBar_dRea])
-    y = np.array([row[2] for row in dBar_dRea])  # Terceira coluna
-    y = np.cumsum(y)
-    
+            
     if args.gpoly is not None:
         gpoly = args.gpoly
     else:
         gpoly = 3
     
-    # Regreção linear com o grau do polinômio especificado
-    coeffs = np.polyfit(x, y, gpoly)
-    poly = np.poly1d(coeffs)
-
-    # Gerar valores para plotagem
-    x_fit = np.linspace(min(x), max(x), 100)
-    y_fit = poly(x_fit)
-
-    from reportlab.lib.pagesizes import A4
-    from reportlab.pdfgen import canvas
-    from reportlab.lib.units import inch
-    import matplotlib.backends.backend_pdf
-
-    os.makedirs('./tmp',exist_ok=True)
-    c = canvas.Canvas("./tmp/final.pdf", pagesize=A4)
-    c.drawString(72, 800, "Página Inicial A4")  # Adiciona um texto simples
-    c.showPage()
-    c.save()
-
-    with matplotlib.backends.backend_pdf.PdfPages("./tmp/final.pdf") as pdf_pages:
-        plt.figure(figsize=(8.27, 11.69))  # Tamanho A4 em polegadas (8.27 x 11.69)
-        plt.scatter(x, y, color='red', label='dP/dR')
-        plt.plot(x_fit, y_fit, label=f'Ajuste Polinomial ({gpoly}º Grau)', color='blue')
-        plt.xlabel('Posição de Barra')
-        plt.ylabel('Reatividade')
-        plt.title('Reatividade em função da posição de barra')
-        plt.legend()
-        plt.grid(True)
-        pdf_pages.savefig()  # Salva o gráfico no PDF
-
-    concatenate_pdfs(pdfname)
+    print("dBar_dRea: ", calib.dBar_dRea)
+    calib.gerar_grafico_calibracao(calib.dBar_dRea, gpoly)
+    calib.concatenate_pdfs(pdfname)
 
 if __name__ == '__main__':
     main()
